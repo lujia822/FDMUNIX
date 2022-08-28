@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# Name: restore
+# Author: Lu Jia
+# Synopsis: restore [FILE]...
+# Description: restore each specified file back to its original location
+
+# create some useful variables
+binloc="$HOME/recyclebin/"
+restorefile="$HOME/.restore.info" 
+deleted="$HOME/.deleted"
+tempfile="$HOME/.tempfile"
+
+# manage options (in case user enters it) and arguments
+while getopts : opt
+do
+  case $opt in
+    \?) echo "$0: does not support options"
+        exit 1;;
+  esac
+done
+
+# exit if no argument is passed in
+if [ $# -eq 0 ]; then
+  echo "$0: missing operand"
+  exit 1
+fi
+
+# loop through the arguments to check if the specified file exists in the recycle bin
+error_count=0
+
+for f in $*
+do
+  file=$(basename $f)
+  # generate error if file does not exist in the recycle bin
+  if [ ! -e $binloc$file ]; then
+    echo "$0: cannot restore '$file': No such file exists in the recycle bin"
+    ((error_count++))
+  else
+    # find the original path and name of the file in .restore.info
+    oldpath=$(grep $file $restorefile | cut -d":" -f2)
+    oldname=$(basename $oldpath)
+    # skip file if the original location cannot be found in .restore.info
+    if [ -z $oldpath ]; then
+      echo "Error finding original location of the file"
+      ((error_count++))
+      continue
+    fi
+    # check to see whether file with same name exists, if so, prompt the user whether to overwrite it
+    if [ -e $oldpath ]; then
+      read -p "Do you want to overwrite? y/n " entry
+      if [[ $entry != y* && $entry != Y* ]]; then
+        continue
+      fi
+    fi
+    # check whether the old directory exists, if not, create one (for files recycled with recycle -r)
+    olddir=$(dirname $oldpath)
+    if [ ! -d $olddir ]; then
+      #echo "restoring old directory..."
+      mkdir -p $olddir
+    fi
+    # move file back to the original location
+    mv $binloc$file $oldpath
+    # remove the entry from .restore.info by using a temp file
+    grep $file $restorefile > $deleted
+    grep -vf $deleted $restorefile > $tempfile
+    mv $tempfile $restorefile    
+  fi
+done
+
+# exit if all files passed in are invalid
+if [ $error_count -eq $# ]; then
+  exit 1
+fi   

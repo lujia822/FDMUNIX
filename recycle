@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# Name: recycle
+# Author: Lu Jia
+# Synopsis: recycle [OPTION]... [FILE]...
+# Description: Recycle each specified file to the recycle bin. By default, it does not recycle directories.
+# Options: -i	prompt before recycling the file
+#          -v	explain what is being done
+#          -r	recycle directories and their contents recursively
+
+
+# create some useful variables
+binloc="$HOME/recyclebin"
+restorefile="$HOME/.restore.info"
+interactive=false
+verbose=false
+recursive=false
+
+# function to recycle a single file
+function recycle(){
+  # implement the interactive mode 
+  if $interactive; then
+    read -p "$0: recycle file '$1'? " entry
+    if [[ $entry != y* && $entry != Y* ]]; then
+      return 0
+    fi
+  fi
+  # get the absolute path of the file
+  abspath=$(realpath $1)
+  # get the inode and generate a new name
+  inode=$(ls -i $1 | cut -d" " -f1)
+  newname=$(basename $1)"_"$inode
+  # save new name and the absolute path to .restore.info
+  echo $newname":"$abspath >> $restorefile
+  newpath=$(dirname $abspath)"/"$newname
+  # rename the file
+  mv $1 $newpath
+  # move the file to the recycle bin
+  mv $newpath $binloc
+  # implement the verbose mode
+  if $verbose; then
+    echo "recycled '$1'"
+  fi
+}
+
+# function to recycle a directory
+function recycle_dir(){
+  # find all files inside the directory and call recycle()
+  for file in $(find $1 -type f); do
+    recycle $file
+  done
+  # delete empty subdirectories
+  find $1 -type d -empty -delete
+  # delete the directory itself if it's empty
+  rmdir $1 2>/dev/null
+} 
+
+# create a recycle bin if it does not already exist
+if [ ! -d $binloc ]; then
+  mkdir $binloc
+fi
+
+# manage options (-i, -r, -v) and arguments
+while getopts :ivr opt
+do
+  case $opt in
+    i) interactive=true;;
+    v) verbose=true;;
+    r) recursive=true;;
+    \?) echo "$0: invalid option -- '$OPTARG'"
+        exit 1;;
+  esac
+done
+shift $(($OPTIND - 1))
+
+# exit if no argument is passed in
+if [ $# -eq 0 ]; then
+  echo "$0: missing operand"
+  exit 1
+fi
+
+# loop through the arguments to check if they are valid files
+error_count=0
+
+for file in $*
+do
+  # generate error if file does not exist
+  if [ ! -e $file ]; then
+    echo "$0: cannot remove '$file': No such file or directory"
+    ((error_count++))
+  # if file is a directory, check whether recursive is true, otherwise generate error
+  elif [ -d "$file" ]; then
+    if $recursive; then
+      recycle_dir $file
+    else
+      echo "$0: cannot remove '$file': Is a directory"
+      ((error_count++))
+    fi
+  # generate error if the argument is recycle
+  elif [ $file = "recycle" ]; then
+    echo "Attempting to delete recycle - operation aborted"
+    ((error_count++))
+  # recycle the file
+  else
+    recycle $file
+  fi
+done
+
+# exit only if all files are invalid
+if [ $error_count -eq $# ]; then
+  ###echo "exiting..."
+  exit 1
+fi
+
